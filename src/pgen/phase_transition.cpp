@@ -58,7 +58,9 @@ Real rho0_par;
 // Cooling related constants
 Real sigma_b = 5.6704e-5; // erg/cm^2/s/K^4
 Real kappa_par; // opacity
-Real lunit; // time unit in s
+Real lunit; // length unit in cm
+Real amplitude; // amplitude of perturbation
+Real wavelength; // wavelength of perturbation
 
 
 //========================================================================================
@@ -145,6 +147,8 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   rho0_par = pin->GetOrAddReal("problem","rho0_par", 1.0);
   tunit = pin->GetOrAddReal("problem","tunit", 2300.0);
   lunit = pin->GetOrAddReal("problem","lunit", 1.0e5);
+  wavelength = pin->GetOrAddReal("problem","wavelength", 0.5);
+  amplitude = pin->GetOrAddReal("problem","amplitude", 1e-6);
   kappa_par = pin->GetOrAddReal("problem","kappa_par", 2.5);
   Real tgas;
   tgas = pin->GetOrAddReal("problem","tgas",1.0);
@@ -165,16 +169,29 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
   sigma = pin->GetOrAddReal("problem","sigma",100.0);
   Real gamma = peos->GetGamma();
 
+  Real vunit = std::sqrt(kb_over_mu_mH * tunit);
+  Real timeunit = lunit/vunit;
+  // some hard coded constants
+  Real a = 16.6;
+  Real b = 0.3;
+  Real l = 1.6;
+  Real big_Gamma = (1.0+a)*(b+l)/(1.0+l*a);
+  Real omegaT = 4.*sigma_b*std::pow(tgas*tunit, 3.0) * kappa_par/C_v * timeunit;
+  Real omegaL = a*omegaT/(1.0+l*a);
+  Real omegaIm= omegaL*(1.0+a)/(big_Gamma*a);
+  Real wavenumber = 2.0*PI/wavelength;
+
   // Initialize hydro variable
   for(int k=ks; k<=ke; ++k) {
     for (int j=js; j<=je; ++j) {
       for (int i=is; i<=ie; ++i) {
-        phydro->u(IDN,k,j,i) = rho0_gas;
-        phydro->u(IM1,k,j,i) = 0.0;
+        Real x1 = pcoord->x1v(i);
+        phydro->u(IDN,k,j,i) = rho0_gas * (1.0 + a*amplitude*std::sin(2.0*PI*x1/wavelength));
+        phydro->u(IM1,k,j,i) = 0.0 + (wavenumber/omegaIm)*(1.0+a)*amplitude*std::sin(2.0*PI*x1/wavelength-PI/2.0);
         phydro->u(IM2,k,j,i) = 0.0;
         phydro->u(IM3,k,j,i) = 0.0;
         if (NON_BAROTROPIC_EOS) {
-          phydro->u(IEN,k,j,i) = rho0_gas*tgas/(gamma-1.0);
+          phydro->u(IEN,k,j,i) = rho0_gas*tgas/(gamma-1.0) * (1.0+(1.0+a)*amplitude*std::sin(2.0*PI*x1/wavelength));
           phydro->u(IEN,k,j,i) += 0.5*SQR(phydro->u(IM1,k,j,i))/phydro->u(IDN,k,j,i);
           phydro->u(IEN,k,j,i) += 0.5*SQR(phydro->u(IM2,k,j,i))/phydro->u(IDN,k,j,i);
           phydro->u(IEN,k,j,i) += 0.5*SQR(phydro->u(IM3,k,j,i))/phydro->u(IDN,k,j,i);
@@ -182,7 +199,7 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
         
         if (NSCALARS > 0) {
           for (int n=0; n<NSCALARS; ++n) {
-            pscalars->s(n,k,j,i) = rho0_par;
+            pscalars->s(n,k,j,i) = rho0_par + rho0_gas*(-SQR(wavenumber/omegaIm)*(1.0+a)/a-1.0)*a*amplitude*std::sin(2.0*PI*x1/wavelength);
           }
         } 
       }
